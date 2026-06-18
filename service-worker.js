@@ -1,8 +1,15 @@
-const CACHE_NAME = 'personal-workout-log-v2';
+const CACHE_NAME = 'personal-workout-log-v5';
 const CORE_ASSETS = [
   './',
   './index.html',
-  './manifest.json'
+  './manifest.json',
+  './assets/app.css',
+  './assets/icon-192.png',
+  './assets/icon-512.png',
+  './assets/vendor/fontawesome/css/all.min.css',
+  './assets/vendor/fontawesome/webfonts/fa-solid-900.woff2',
+  './assets/vendor/chart.umd.min.js',
+  './assets/vendor/xlsx.full.min.js'
 ];
 
 self.addEventListener('install', event => {
