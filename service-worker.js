@@ -1,4 +1,4 @@
-const CACHE_NAME = 'personal-workout-log-v5';
+const CACHE_NAME = 'personal-workout-log-v7';
 const CORE_ASSETS = [
   './',
   './index.html',

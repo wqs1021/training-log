@@ -13,6 +13,7 @@
     
     <!-- 桌面图标 -->
     <link rel="apple-touch-icon" href="./assets/icon-192.png">
+    <link rel="icon" href="./assets/icon-192.png" type="image/png">
     <link rel="manifest" href="./manifest.json">
     
     <title>博士健身日志 - 个人版</title>
@@ -240,7 +241,16 @@
                     <button aria-label="关闭记录弹窗" onclick="App.closeModal()" class="w-8 h-8 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center active-scale"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="scroll-container p-6 space-y-6 flex-1 overflow-y-auto">
+                    <div id="rest-timer" class="hidden bg-gray-900 text-white p-4 rounded-2xl items-center gap-3 shadow-lg">
+                        <div class="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center"><i class="fa-solid fa-clock"></i></div>
+                        <div class="flex-1">
+                            <div id="rest-timer-label" class="text-[10px] font-bold text-gray-300 uppercase tracking-wider">组间休息</div>
+                            <div id="rest-timer-value" class="text-2xl font-black tabular-nums">01:00</div>
+                        </div>
+                        <button type="button" onclick="App.skipRestTimer()" class="px-3 py-2 rounded-xl bg-white/10 text-xs font-bold">跳过</button>
+                    </div>
                     <div id="modal-tips" class="bg-blue-50 p-4 rounded-2xl text-blue-800 text-xs font-medium leading-relaxed border-l-4 border-blue-500"></div>
+                    <div id="progression-advice" class="hidden p-4 rounded-2xl text-xs leading-relaxed border"></div>
                     <div class="space-y-3">
                         <div class="flex text-[10px] font-bold text-gray-400 px-2 uppercase tracking-wider" id="input-headers">
                             <span class="w-10 text-center">SET</span>
@@ -276,7 +286,7 @@
                     </label>
                     <label class="block">
                         <span class="block text-xs font-bold text-gray-400 mb-2">动作类型</span>
-                        <select id="plan-ex-type" class="w-full h-12 rounded-2xl bg-gray-50 px-4 font-bold border border-transparent focus:border-blue-500">
+                        <select id="plan-ex-type" onchange="App.updatePlanProgressionFields()" class="w-full h-12 rounded-2xl bg-gray-50 px-4 font-bold border border-transparent focus:border-blue-500">
                             <option value="weighted">负重动作</option>
                             <option value="bodyweight">自重动作</option>
                             <option value="time">计时动作</option>
@@ -288,10 +298,30 @@
                             <span class="block text-xs font-bold text-gray-400 mb-2">目标组数</span>
                             <input id="plan-ex-sets" type="number" min="1" class="w-full h-12 rounded-2xl bg-gray-50 px-4 font-bold border border-transparent focus:border-blue-500" placeholder="3">
                         </label>
-                        <label class="block">
+                        <label class="block" id="plan-target-reps-field">
                             <span class="block text-xs font-bold text-gray-400 mb-2">目标次数/时间</span>
                             <input id="plan-ex-reps" class="w-full h-12 rounded-2xl bg-gray-50 px-4 font-bold border border-transparent focus:border-blue-500" placeholder="12 或 30s">
                         </label>
+                    </div>
+                    <div id="plan-progression-fields" class="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 space-y-3">
+                        <div>
+                            <div class="text-xs font-black text-emerald-800">双重渐进</div>
+                            <div class="text-[11px] text-emerald-700 mt-1">先在次数区间内逐组增加次数，全部达到上限后再加重。</div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2">
+                            <label class="block">
+                                <span class="block text-[10px] font-bold text-emerald-700 mb-1">次数下限</span>
+                                <input id="plan-ex-rep-min" type="number" min="1" max="100" class="w-full h-11 rounded-xl bg-white px-3 font-bold border border-emerald-100" placeholder="8">
+                            </label>
+                            <label class="block">
+                                <span class="block text-[10px] font-bold text-emerald-700 mb-1">次数上限</span>
+                                <input id="plan-ex-rep-max" type="number" min="1" max="100" class="w-full h-11 rounded-xl bg-white px-3 font-bold border border-emerald-100" placeholder="12">
+                            </label>
+                            <label class="block" id="plan-weight-step-field">
+                                <span class="block text-[10px] font-bold text-emerald-700 mb-1">加重 KG</span>
+                                <input id="plan-ex-weight-step" type="number" min="0.25" max="100" step="0.25" class="w-full h-11 rounded-xl bg-white px-3 font-bold border border-emerald-100" placeholder="2.5">
+                            </label>
+                        </div>
                     </div>
                     <label class="block">
                         <span class="block text-xs font-bold text-gray-400 mb-2">动作提示</span>
@@ -412,13 +442,39 @@
             }[type] || '负重';
         }
 
+        function defaultRepRange(reps, type) {
+            const parsed = Number.parseInt(String(reps || ''), 10);
+            const max = Number.isFinite(parsed) ? Math.max(1, parsed) : 12;
+            if (type === 'time' || type === 'cardio') return { min: max, max };
+            if (max >= 15) return { min: Math.max(1, max - 3), max };
+            return { min: Math.max(1, max - 4), max };
+        }
+
+        function progressionSettings(ex) {
+            const fallback = defaultRepRange(ex.reps, ex.type);
+            const repMin = Math.max(1, Number(ex.repMin) || fallback.min);
+            const repMax = Math.max(repMin, Number(ex.repMax) || fallback.max);
+            return {
+                repMin,
+                repMax,
+                weightStep: Math.max(0.25, Number(ex.weightStep) || 2.5)
+            };
+        }
+
+        function targetLabel(ex) {
+            if (ex.type === 'cardio' || ex.type === 'time') return String(ex.reps);
+            const settings = progressionSettings(ex);
+            return `${settings.repMin}–${settings.repMax}`;
+        }
+
         function normalizeWorkoutPlan(raw) {
             const base = cloneData(WORKOUT_DB);
             [1, 2, 3, 4, 5].forEach(day => {
                 base[day].exercises = base[day].exercises.map((ex, index) => ({
                     ...ex,
                     id: ex.id || `default-${day}-${index}`,
-                    icon: safeIcon(ex.icon, ex.type)
+                    icon: safeIcon(ex.icon, ex.type),
+                    ...progressionSettings(ex)
                 }));
             });
             if (!raw || typeof raw !== 'object') return base;
@@ -441,6 +497,7 @@
                             name: String(ex.name || '新动作').trim().slice(0, 100),
                             sets: Math.min(20, Math.max(1, Number(ex.sets) || 1)),
                             reps: String(ex.reps || '12').trim().slice(0, 30),
+                            ...progressionSettings({ ...ex, type }),
                             type,
                             icon: safeIcon(ex.icon, type),
                             detail: String(ex.detail || '保持动作稳定，按当天状态微调。').trim().slice(0, 500)
@@ -454,9 +511,16 @@
 
         function isLogDone(ex, logRows) {
             if (!logRows) return false;
-            if (ex.type === 'cardio') return logRows.some(x => x.t || x.c);
-            if (ex.type === 'bodyweight' || ex.type === 'time') return logRows.some(x => x.r);
-            return logRows.some(x => x.w || x.r);
+            return logRows.some(row => rowIsCompleted(ex, row));
+        }
+
+        function rowIsCompleted(ex, row) {
+            if (!row) return false;
+            if (row.done === true) return true;
+            if (row.done === false) return false;
+            if (ex.type === 'cardio') return Boolean(row.t || row.c);
+            if (ex.type === 'bodyweight' || ex.type === 'time') return Boolean(row.r);
+            return Boolean(row.w || row.r);
         }
 
         function toNumber(value) {
@@ -470,6 +534,7 @@
 
         function summarizeRows(ex, rows) {
             if (!isLogDone(ex, rows)) return '';
+            rows = rows.filter(row => rowIsCompleted(ex, row));
             if (ex.type === 'cardio') {
                 const mode = (rows.find(row => row.m) || {}).m || '有氧运动';
                 const minutes = rows.reduce((sum, row) => sum + toNumber(row.t), 0);
@@ -504,6 +569,8 @@
                     clean[key] = String(source[key] ?? '').slice(0, 20);
                 });
                 clean.m = String(source.m ?? '').slice(0, 40);
+                clean.rir = String(source.rir ?? '').slice(0, 4);
+                clean.done = source.done === true || (source.done !== false && ['w', 'r', 't', 'c'].some(key => String(source[key] ?? '').trim()));
                 return clean;
             });
         }
@@ -516,7 +583,8 @@
                 name: String(value.name || '未命名动作').slice(0, 100),
                 type,
                 detail: String(value.detail || '').slice(0, 500),
-                icon: safeIcon(value.icon, type)
+                icon: safeIcon(value.icon, type),
+                ...progressionSettings({ ...value, type })
             };
         }
 
@@ -572,7 +640,7 @@
         ];
 
         const App = {
-            state: { selectedDate: toDateKey(getInitialDate()), selectedDay: getWeekday(new Date()), logs: {}, workouts: normalizeWorkoutPlan(), modalExIdx: null, planEditIdx: null, planDraftIcon: null, currentView: 'home', chart: null, trendChart: null, trendKey: '' },
+            state: { selectedDate: toDateKey(getInitialDate()), selectedDay: getWeekday(new Date()), logs: {}, workouts: normalizeWorkoutPlan(), modalExIdx: null, planEditIdx: null, planDraftIcon: null, currentView: 'home', chart: null, trendChart: null, trendKey: '', restTimerId: null, restEndsAt: 0 },
             init() {
                 this.loadPlan();
                 this.loadLocal();
@@ -631,7 +699,7 @@
                 }
             },
             persistLocal() {
-                localStorage.setItem(DATA_KEY, JSON.stringify({ version: 2, logsByDate: this.state.logs }));
+                localStorage.setItem(DATA_KEY, JSON.stringify({ version: 3, logsByDate: this.state.logs }));
             },
             snapshotExercise(ex) {
                 return {
@@ -639,7 +707,8 @@
                     name: ex.name,
                     type: ex.type,
                     detail: ex.detail || '',
-                    icon: safeIcon(ex.icon, ex.type)
+                    icon: safeIcon(ex.icon, ex.type),
+                    ...progressionSettings(ex)
                 };
             },
             migrateLogs() {
@@ -667,9 +736,13 @@
                             record.exerciseSnapshots[ex.id] = this.snapshotExercise(ex);
                             changed = true;
                         }
+                        if (record.version !== 3) {
+                            record.entries[ex.id] = sanitizeRows(record.entries[ex.id]);
+                            changed = true;
+                        }
                     });
-                    if (record.version !== 2) {
-                        record.version = 2;
+                    if (record.version !== 3) {
+                        record.version = 3;
                         changed = true;
                     }
                 });
@@ -720,9 +793,88 @@
                 const rows = this.getExerciseRows(this.state.logs[foundDate], ex, exIdx);
                 return { dateKey: foundDate, summary: summarizeRows(ex, rows), rows };
             },
+            isCompletedSet(ex, row) {
+                return rowIsCompleted(ex, row);
+            },
+            getProgressionAdvice(ex, rows) {
+                if (!ex || ex.type === 'cardio' || ex.type === 'time') return null;
+                const settings = progressionSettings(ex);
+                const completed = (Array.isArray(rows) ? rows : []).filter(row => this.isCompletedSet(ex, row));
+                if (!completed.length) {
+                    return {
+                        kind: 'start',
+                        title: `目标 ${settings.repMin}–${settings.repMax} 次`,
+                        detail: `先固定重量，在保留 1–2 次余力的前提下逐组增加次数。`
+                    };
+                }
+
+                const requiredSets = Math.max(1, Number(ex.sets) || 1);
+                if (completed.length < requiredSets) {
+                    return {
+                        kind: 'incomplete',
+                        title: `先完成剩余 ${requiredSets - completed.length} 组`,
+                        detail: '只根据已点击完成的正式组生成递增建议。'
+                    };
+                }
+
+                const official = completed.slice(0, requiredSets);
+                const reps = official.map(row => toNumber(row.r));
+                const firstWeight = ex.type === 'weighted' ? toNumber(official.find(row => toNumber(row.w) > 0)?.w) : 0;
+                const weights = ex.type === 'weighted' ? official.map(row => toNumber(row.w)).filter(n => n > 0) : [];
+                const mixedWeights = weights.length > 1 && weights.some(weight => Math.abs(weight - weights[0]) > 0.001);
+                if (mixedWeights) {
+                    return {
+                        kind: 'hold',
+                        title: '本次正式组重量不一致',
+                        detail: '双重渐进需要在同一重量下比较次数；递减组不用于触发加重。'
+                    };
+                }
+                if (reps.some(value => value < settings.repMin)) {
+                    return {
+                        kind: 'recover',
+                        title: '保持重量，先回到次数下限',
+                        detail: `至少有一组低于 ${settings.repMin} 次。若连续两次如此，建议减重 5%–10%。`
+                    };
+                }
+
+                const allAtTop = reps.every(value => value >= settings.repMax);
+                const allRirRecorded = official.every(row => row.rir !== '' && row.rir !== undefined && Number.isFinite(Number(row.rir)));
+                const minimumRir = allRirRecorded ? Math.min(...official.map(row => Number(row.rir))) : null;
+                if (allAtTop && allRirRecorded && minimumRir >= 1) {
+                    if (ex.type === 'weighted' && firstWeight > 0) {
+                        const nextWeight = Math.round((firstWeight + settings.weightStep) * 100) / 100;
+                        return {
+                            kind: 'increase',
+                            title: `下次建议 ${nextWeight}kg`,
+                            detail: `全部正式组已达 ${settings.repMax} 次且仍有余力；加重 ${settings.weightStep}kg 后从 ${settings.repMin} 次附近重新推进。`,
+                            nextWeight
+                        };
+                    }
+                    return {
+                        kind: 'increase',
+                        title: '下次增加动作难度',
+                        detail: `全部正式组已达 ${settings.repMax} 次；可增加小负重或更难变式，再从 ${settings.repMin} 次开始。`
+                    };
+                }
+                if (allAtTop) {
+                    return {
+                        kind: 'hold',
+                        title: '先保持当前重量',
+                        detail: allRirRecorded ? '次数已达上限，但存在 RIR 0 的力竭组；先稳定到 RIR 1–2 再加重。' : '次数已达上限；下次补记 RIR，确认仍有 1–2 次余力后再加重。'
+                    };
+                }
+
+                const total = reps.reduce((sum, value) => sum + value, 0);
+                const targetTotal = Math.min(settings.repMax * requiredSets, total + 1);
+                return {
+                    kind: 'reps',
+                    title: ex.type === 'weighted' && firstWeight ? `保持 ${firstWeight}kg，总次数 +1` : '保持当前难度，总次数 +1',
+                    detail: `本次正式组共 ${total} 次，下次目标 ${targetTotal} 次，优先补齐次数最少的一组。`
+                };
+            },
             ensureSelectedRecord() {
                 if (!this.state.logs[this.state.selectedDate]) {
-                    this.state.logs[this.state.selectedDate] = { version: 2, day: this.state.selectedDay, entries: {}, exerciseSnapshots: {} };
+                    this.state.logs[this.state.selectedDate] = { version: 3, day: this.state.selectedDay, entries: {}, exerciseSnapshots: {} };
                 }
                 this.state.logs[this.state.selectedDate].day = this.state.selectedDay;
                 if (!this.state.logs[this.state.selectedDate].entries) this.state.logs[this.state.selectedDate].entries = {};
@@ -813,17 +965,20 @@
                 }
             },
 
-            renderSetRow(i, w, r, defaultReps, isBw, isCardio, t, h, c, m) {
+            renderSetRow(i, w, r, defaultReps, isBw, isCardio, t, h, c, m, rir = '', done = false) {
+                const doneClass = done ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-300 border-gray-200';
+                const rowClass = done ? 'border-green-200 bg-green-50/60' : 'border-gray-100 bg-gray-50';
                 if (isCardio) {
                     const mode = m || '有氧运动';
                     const modes = ['有氧运动', '椭圆机', '爬楼机', '跑步机爬坡', '跑步机慢跑', '单车'];
                     const modeOptions = modes.map(name => `<option value="${escapeAttr(name)}" ${mode === name ? 'selected' : ''}>${name}</option>`).join('');
-                    return `<div class="set-row mb-3 rounded-2xl bg-gray-50 border border-gray-100 p-3">
+                    return `<div class="set-row mb-3 rounded-2xl border p-3 ${rowClass}" data-completed="${done}">
                         <div class="flex items-center space-x-3">
                             <div class="w-10 h-10 rounded-xl bg-white flex items-center justify-center font-bold text-gray-400 border border-gray-100 text-xs">${i}</div>
                             <select class="input-m flex-1 h-11 rounded-xl bg-white px-3 font-bold text-sm text-gray-800 border border-transparent focus:border-blue-500 transition-all">
                                 ${modeOptions}
                             </select>
+                            <button type="button" aria-label="完成第${i}组" onclick="App.toggleSetComplete(this)" class="set-complete-btn w-11 h-11 rounded-xl border flex items-center justify-center transition-all ${doneClass}"><i class="fa-solid fa-check"></i></button>
                         </div>
                         <div class="grid grid-cols-3 gap-2 mt-3">
                             <label class="block">
@@ -841,27 +996,152 @@
                         </div>
                     </div>`;
                 }
-                const wProps = isBw ? 'disabled value="自重" class="flex-1 bg-gray-100 h-12 rounded-xl text-center font-bold text-gray-400 text-sm border border-transparent input-w"' 
-                                    : `value="${escapeAttr(w)}" placeholder="-" class="flex-1 bg-gray-50 h-12 rounded-xl text-center font-bold text-lg input-w focus:bg-white border border-transparent focus:border-blue-500 transition-all"`;
+                const wProps = isBw ? 'disabled value="自重" class="w-full bg-gray-100 h-11 rounded-xl text-center font-bold text-gray-400 text-sm border border-transparent input-w"'
+                                    : `value="${escapeAttr(w)}" placeholder="-" class="w-full bg-white h-11 rounded-xl text-center font-bold input-w border border-transparent focus:border-blue-500 transition-all"`;
 
-                return `<div class="flex items-center space-x-3 set-row mb-3">
-                        <div class="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center font-bold text-gray-400 border border-gray-100">${i}</div>
-                        <input type="text" ${wProps}>
-                        <input type="number" class="flex-1 bg-gray-50 h-12 rounded-xl text-center font-bold text-lg input-r focus:bg-white border border-transparent focus:border-blue-500 transition-all" placeholder="${escapeAttr(defaultReps)}" value="${escapeAttr(r)}">
-                    </div>`;
+                return `<div class="set-row mb-3 rounded-2xl border p-3 ${rowClass}" data-completed="${done}">
+                    <div class="flex items-end gap-2">
+                        <div class="w-9 h-11 rounded-xl bg-white flex items-center justify-center font-bold text-gray-400 border border-gray-100 flex-shrink-0">${i}</div>
+                        <label class="flex-1 min-w-0">
+                            <span class="block text-[9px] font-bold text-gray-400 mb-1 text-center">${isBw ? '自重' : '重量 KG'}</span>
+                            <input type="text" ${wProps}>
+                        </label>
+                        <label class="flex-1 min-w-0">
+                            <span class="block text-[9px] font-bold text-gray-400 mb-1 text-center">次数</span>
+                            <input type="number" min="0" class="w-full bg-white h-11 rounded-xl text-center font-bold input-r border border-transparent focus:border-blue-500 transition-all" placeholder="${escapeAttr(defaultReps)}" value="${escapeAttr(r)}">
+                        </label>
+                        <label class="w-14 flex-shrink-0">
+                            <span class="block text-[9px] font-bold text-gray-400 mb-1 text-center">RIR</span>
+                            <input type="number" min="0" max="9" class="w-full bg-white h-11 rounded-xl text-center font-bold input-rir border border-transparent focus:border-blue-500 transition-all" placeholder="2" value="${escapeAttr(rir)}">
+                        </label>
+                        <button type="button" aria-label="完成第${i}组" onclick="App.toggleSetComplete(this)" class="set-complete-btn w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0 transition-all ${doneClass}"><i class="fa-solid fa-check"></i></button>
+                    </div></div>`;
             },
 
             addSet(defaultReps, isBw, isCardio) {
                 const wrapper = document.getElementById('add-set-btn-wrapper');
                 const newIndex = document.querySelectorAll('.set-row').length + 1;
-                wrapper.insertAdjacentHTML('beforebegin', this.renderSetRow(newIndex, '', '', defaultReps, isBw, isCardio, '', '', '', ''));
+                wrapper.insertAdjacentHTML('beforebegin', this.renderSetRow(newIndex, '', '', defaultReps, isBw, isCardio, '', '', '', '', '', false));
                 wrapper.querySelector('span').innerText = `增加一组 (当前${newIndex}组)`;
-                this.setupAutoFill(); // 重新绑定事件以支持新增行（如果需要）
+                this.setupAutoFill();
+                this.setupProgressionTracking();
             },
             addSetForCurrentExercise() {
                 const ex = this.state.workouts[this.state.selectedDay].exercises[this.state.modalExIdx];
                 if (!ex) return;
                 this.addSet(ex.reps, ex.type === 'bodyweight' || ex.type === 'time', ex.type === 'cardio');
+            },
+            readFormRows(ex) {
+                return Array.from(document.querySelectorAll('.set-row')).map(row => {
+                    if (ex.type === 'cardio') {
+                        return {
+                            m: row.querySelector('.input-m').value,
+                            t: row.querySelector('.input-t').value,
+                            h: row.querySelector('.input-h').value,
+                            c: row.querySelector('.input-c').value,
+                            done: row.dataset.completed === 'true'
+                        };
+                    }
+                    return {
+                        w: row.querySelector('.input-w').value,
+                        r: row.querySelector('.input-r').value,
+                        rir: row.querySelector('.input-rir').value,
+                        done: row.dataset.completed === 'true'
+                    };
+                });
+            },
+            setupProgressionTracking() {
+                document.querySelectorAll('.set-row input, .set-row select').forEach(input => {
+                    if (input.dataset.progressionListener) return;
+                    input.dataset.progressionListener = 'true';
+                    input.addEventListener(input.tagName === 'SELECT' ? 'change' : 'input', () => this.renderProgressionAdviceFromForm());
+                });
+            },
+            renderProgressionAdvice(advice, sourceLabel = '') {
+                const card = document.getElementById('progression-advice');
+                if (!card || !advice) {
+                    if (card) card.classList.add('hidden');
+                    return;
+                }
+                const styles = {
+                    increase: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+                    reps: 'bg-blue-50 border-blue-200 text-blue-800',
+                    recover: 'bg-orange-50 border-orange-200 text-orange-800',
+                    hold: 'bg-amber-50 border-amber-200 text-amber-800',
+                    incomplete: 'bg-gray-50 border-gray-200 text-gray-700',
+                    start: 'bg-violet-50 border-violet-200 text-violet-800'
+                };
+                card.className = `p-4 rounded-2xl text-xs leading-relaxed border ${styles[advice.kind] || styles.start}`;
+                card.innerHTML = `${sourceLabel ? `<div class="text-[10px] font-bold opacity-60 mb-1">${escapeHtml(sourceLabel)}</div>` : ''}<div class="font-black text-sm">${escapeHtml(advice.title)}</div><div class="mt-1 opacity-90">${escapeHtml(advice.detail)}</div>`;
+            },
+            renderProgressionAdviceFromForm() {
+                const ex = this.state.workouts[this.state.selectedDay].exercises[this.state.modalExIdx];
+                if (!ex) return;
+                this.renderProgressionAdvice(this.getProgressionAdvice(ex, this.readFormRows(ex)));
+            },
+            toggleSetComplete(button) {
+                const row = button.closest('.set-row');
+                const ex = this.state.workouts[this.state.selectedDay].exercises[this.state.modalExIdx];
+                if (!row || !ex) return;
+                const completing = row.dataset.completed !== 'true';
+                if (completing) {
+                    const reps = row.querySelector('.input-r');
+                    const weight = row.querySelector('.input-w');
+                    const duration = row.querySelector('.input-t');
+                    if (ex.type === 'cardio' && !duration.value && !row.querySelector('.input-c').value) {
+                        alert('请先填写有氧时长或热量。');
+                        return;
+                    }
+                    if (ex.type !== 'cardio' && (!reps.value || (ex.type === 'weighted' && !weight.value))) {
+                        alert(ex.type === 'weighted' ? '请先填写重量和次数。' : '请先填写次数或时间。');
+                        return;
+                    }
+                }
+                row.dataset.completed = String(completing);
+                row.classList.toggle('border-green-200', completing);
+                row.classList.toggle('bg-green-50/60', completing);
+                row.classList.toggle('border-gray-100', !completing);
+                row.classList.toggle('bg-gray-50', !completing);
+                button.className = `set-complete-btn w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0 transition-all ${completing ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-300 border-gray-200'}`;
+                button.setAttribute('aria-pressed', String(completing));
+                if (completing && ex.type !== 'cardio') this.startRestTimer(60);
+                this.renderProgressionAdviceFromForm();
+            },
+            startRestTimer(seconds = 60) {
+                clearInterval(this.state.restTimerId);
+                this.state.restEndsAt = Date.now() + seconds * 1000;
+                this.updateRestTimer();
+                this.state.restTimerId = setInterval(() => this.updateRestTimer(), 250);
+            },
+            updateRestTimer() {
+                const timer = document.getElementById('rest-timer');
+                const value = document.getElementById('rest-timer-value');
+                const label = document.getElementById('rest-timer-label');
+                if (!timer || !value || !label || !this.state.restEndsAt) return;
+                const remaining = Math.max(0, Math.ceil((this.state.restEndsAt - Date.now()) / 1000));
+                timer.classList.remove('hidden');
+                timer.classList.add('flex');
+                const minutes = Math.floor(remaining / 60);
+                const seconds = remaining % 60;
+                value.innerText = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                label.innerText = remaining ? '组间休息' : '休息结束';
+                if (remaining > 0) return;
+                clearInterval(this.state.restTimerId);
+                this.state.restTimerId = null;
+                this.state.restEndsAt = 0;
+                value.innerText = '开始';
+                if ('vibrate' in navigator) navigator.vibrate([180, 100, 180]);
+                this.showToast('休息结束，开始下一组');
+            },
+            skipRestTimer() {
+                clearInterval(this.state.restTimerId);
+                this.state.restTimerId = null;
+                this.state.restEndsAt = 0;
+                const timer = document.getElementById('rest-timer');
+                if (timer) {
+                    timer.classList.add('hidden');
+                    timer.classList.remove('flex');
+                }
             },
 
             openModal(idx) {
@@ -869,6 +1149,10 @@
                 const ex = this.state.workouts[this.state.selectedDay].exercises[idx];
                 const logs = this.getExerciseRows(this.getSelectedRecord(), ex, idx);
                 const last = this.getLastExerciseRecord(this.state.selectedDay, idx);
+                const hasCurrentData = logs.some(row => this.isCompletedSet(ex, row) || row.r || row.t || row.c);
+                const lastAdvice = last ? this.getProgressionAdvice(ex, last.rows) : this.getProgressionAdvice(ex, []);
+                const lastWeight = last && ex.type === 'weighted' ? toNumber(last.rows.find(row => rowIsCompleted(ex, row) && toNumber(row.w) > 0)?.w) : 0;
+                const recommendedWeight = lastAdvice && lastAdvice.nextWeight ? lastAdvice.nextWeight : lastWeight;
 
                 document.getElementById('modal-title').innerText = ex.name;
                 document.getElementById('modal-tips').innerHTML = `<i class="fa-solid fa-graduation-cap mr-1"></i> 博士指引：${escapeHtml(ex.detail)}${last ? `<div class="mt-2 pt-2 border-t border-blue-100 text-blue-700"><i class="fa-solid fa-clock-rotate-left mr-1"></i> 上次记录：${escapeHtml(last.summary)} · ${formatShortDate(last.dateKey)}</div>` : ''}`;
@@ -884,17 +1168,16 @@
                     `;
                 } else {
                     headers.innerHTML = `
-                        <span class="w-10 text-center">SET</span>
-                        <span class="flex-1 text-center">重量 (KG)</span>
-                        <span class="flex-1 text-center">${isTime ? "时间 (Secs)" : "次数 (REPS)"}</span>
+                        <span class="w-full text-center">${isTime ? `每组记录时间，完成后点击 ✓` : `目标 ${targetLabel(ex)} 次 · RIR 建议 1–2 · 完成后点击 ✓`}</span>
                     `;
                 }
 
                 let html = '';
                 const currentSetsCount = Math.max(ex.sets, logs.length);
                 for(let i=1; i<=currentSetsCount; i++) {
-                    const l = logs[i-1] || {w:'', r:'', t:'', h:'', c:'', m:''};
-                    html += this.renderSetRow(i, l.w, l.r, ex.reps, isBw, isCardio, l.t, l.h, l.c, l.m);
+                    const l = logs[i-1] || {w: recommendedWeight || '', r:'', t:'', h:'', c:'', m:'', rir:'', done:false};
+                    const done = this.isCompletedSet(ex, l);
+                    html += this.renderSetRow(i, l.w, l.r, targetLabel(ex), isBw, isCardio, l.t, l.h, l.c, l.m, l.rir, done);
                 }
 
                 html += `<div id="add-set-btn-wrapper" class="pt-2">
@@ -909,6 +1192,15 @@
                 
                 // 启用自动填充
                 this.setupAutoFill();
+                this.setupProgressionTracking();
+                const currentAdvice = hasCurrentData ? this.getProgressionAdvice(ex, logs) : lastAdvice;
+                this.renderProgressionAdvice(currentAdvice, !hasCurrentData && last ? '根据上次训练' : '');
+                if (this.state.restEndsAt) this.updateRestTimer();
+                else {
+                    const timer = document.getElementById('rest-timer');
+                    timer.classList.add('hidden');
+                    timer.classList.remove('flex');
+                }
 
                 setTimeout(() => { overlay.classList.remove('opacity-0'); document.getElementById('modal-card').classList.remove('translate-y-full'); }, 10);
             },
@@ -920,16 +1212,7 @@
             },
             saveCurrentLog() {
                 const ex = this.state.workouts[this.state.selectedDay].exercises[this.state.modalExIdx];
-                const isCardio = ex.type === 'cardio';
-                const rows = document.querySelectorAll('.set-row');
-                
-                const newData = Array.from(rows).map(r => {
-                    if (isCardio) {
-                        return { m: r.querySelector('.input-m').value, t: r.querySelector('.input-t').value, h: r.querySelector('.input-h').value, c: r.querySelector('.input-c').value };
-                    } else {
-                        return { w: r.querySelector('.input-w').value, r: r.querySelector('.input-r').value };
-                    }
-                });
+                const newData = this.readFormRows(ex);
 
                 const record = this.ensureSelectedRecord();
                 record.entries[ex.id] = newData;
@@ -982,10 +1265,12 @@
                     const l = this.getExerciseRows(this.getSelectedRecord(), ex, i);
                     const done = isLogDone(ex, l);
                     const last = this.getLastExerciseRecord(this.state.selectedDay, i);
+                    const advice = done ? this.getProgressionAdvice(ex, l) : (last ? this.getProgressionAdvice(ex, last.rows) : null);
+                    const adviceLine = advice ? `<div class="text-[10px] text-emerald-600 mt-1 truncate"><i class="fa-solid fa-arrow-trend-up mr-1"></i>${escapeHtml(advice.title)}</div>` : '';
 
                     return `<button type="button" onclick="App.openModal(${i})" class="w-full text-left bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center space-x-4 mb-4 active:scale-[0.98] transition-transform relative overflow-hidden group">
                         <div class="w-12 h-12 rounded-xl bg-gray-50 flex items-center justify-center text-blue-500 text-lg group-hover:bg-blue-500 group-hover:text-white transition-colors duration-300"><i class="fa-solid ${safeIcon(ex.icon, ex.type)}"></i></div>
-                        <div class="flex-1 min-w-0"><h3 class="font-bold text-gray-800 text-[15px] truncate">${escapeHtml(ex.name)}</h3><div class="text-[10px] text-gray-400 mt-1">${ex.sets}组 × ${escapeHtml(ex.reps)} ${done ? '<span class="text-green-500 ml-2">✓ 已填</span>' : ''}</div>${last ? `<div class="text-[10px] text-blue-500 mt-1 truncate">上次 ${escapeHtml(last.summary)} · ${formatShortDate(last.dateKey)}</div>` : ''}</div>
+                        <div class="flex-1 min-w-0"><h3 class="font-bold text-gray-800 text-[15px] truncate">${escapeHtml(ex.name)}</h3><div class="text-[10px] text-gray-400 mt-1">${ex.sets}组 × ${escapeHtml(targetLabel(ex))} ${done ? '<span class="text-green-500 ml-2">✓ 已填</span>' : ''}</div>${last ? `<div class="text-[10px] text-blue-500 mt-1 truncate">上次 ${escapeHtml(last.summary)} · ${formatShortDate(last.dateKey)}</div>` : ''}${adviceLine}</div>
                         <div class="text-gray-200 ${done ? 'text-green-500' : ''}"><i class="fa-solid fa-circle-check text-xl"></i></div>
                     </button>`;
                 }).join('');
@@ -1011,7 +1296,7 @@
                         <div class="w-11 h-11 rounded-xl bg-blue-50 flex items-center justify-center text-blue-500"><i class="fa-solid ${safeIcon(ex.icon, ex.type)}"></i></div>
                         <div class="flex-1 min-w-0">
                             <div class="font-bold text-gray-900 text-sm truncate">${escapeHtml(ex.name)}</div>
-                            <div class="text-[11px] text-gray-400 mt-1">${typeLabel(ex.type)} · ${ex.sets}组 × ${escapeHtml(ex.reps)}</div>
+                            <div class="text-[11px] text-gray-400 mt-1">${typeLabel(ex.type)} · ${ex.sets}组 × ${escapeHtml(targetLabel(ex))}</div>
                         </div>
                         <button aria-label="编辑${escapeAttr(ex.name)}" onclick="App.openPlanEditor(${idx})" class="w-9 h-9 rounded-full bg-gray-50 text-gray-500 active-scale"><i class="fa-solid fa-pen text-xs"></i></button>
                     </div>
@@ -1075,7 +1360,8 @@
                 this.state.planEditIdx = idx;
                 const isEdit = idx !== null && idx !== undefined;
                 const day = this.state.workouts[this.state.selectedDay];
-                const ex = isEdit ? day.exercises[idx] : { name: '', type: 'weighted', sets: 3, reps: 12, detail: '', icon: null };
+                const ex = isEdit ? day.exercises[idx] : { name: '', type: 'weighted', sets: 3, reps: 12, repMin: 8, repMax: 12, weightStep: 2.5, detail: '', icon: null };
+                const settings = progressionSettings(ex);
                 this.renderExerciseLibraryOptions();
                 this.state.planDraftIcon = ex.icon || null;
 
@@ -1085,8 +1371,12 @@
                 document.getElementById('plan-ex-type').value = ex.type || 'weighted';
                 document.getElementById('plan-ex-sets').value = ex.sets || 3;
                 document.getElementById('plan-ex-reps').value = ex.reps || 12;
+                document.getElementById('plan-ex-rep-min').value = settings.repMin;
+                document.getElementById('plan-ex-rep-max').value = settings.repMax;
+                document.getElementById('plan-ex-weight-step').value = settings.weightStep;
                 document.getElementById('plan-ex-detail').value = ex.detail || '';
                 document.getElementById('plan-delete-btn').classList.toggle('hidden', !isEdit);
+                this.updatePlanProgressionFields();
 
                 const overlay = document.getElementById('plan-modal-overlay');
                 overlay.classList.remove('hidden');
@@ -1111,7 +1401,19 @@
                 document.getElementById('plan-ex-type').value = ex.type;
                 document.getElementById('plan-ex-sets').value = ex.sets;
                 document.getElementById('plan-ex-reps').value = ex.reps;
+                const settings = progressionSettings(ex);
+                document.getElementById('plan-ex-rep-min').value = settings.repMin;
+                document.getElementById('plan-ex-rep-max').value = settings.repMax;
+                document.getElementById('plan-ex-weight-step').value = settings.weightStep;
                 document.getElementById('plan-ex-detail').value = ex.detail;
+                this.updatePlanProgressionFields();
+            },
+            updatePlanProgressionFields() {
+                const type = document.getElementById('plan-ex-type').value;
+                const usesProgression = type === 'weighted' || type === 'bodyweight';
+                document.getElementById('plan-progression-fields').classList.toggle('hidden', !usesProgression);
+                document.getElementById('plan-target-reps-field').classList.toggle('hidden', usesProgression);
+                document.getElementById('plan-weight-step-field').classList.toggle('hidden', type !== 'weighted');
             },
             closePlanModal() {
                 const overlay = document.getElementById('plan-modal-overlay');
@@ -1123,7 +1425,11 @@
                 const name = document.getElementById('plan-ex-name').value.trim().slice(0, 100);
                 const type = document.getElementById('plan-ex-type').value;
                 const sets = Math.min(20, Math.max(1, Number(document.getElementById('plan-ex-sets').value) || 1));
-                const reps = (document.getElementById('plan-ex-reps').value.trim() || (type === 'cardio' ? '25min' : '12')).slice(0, 30);
+                const usesProgression = type === 'weighted' || type === 'bodyweight';
+                const repMin = Math.min(100, Math.max(1, Number(document.getElementById('plan-ex-rep-min').value) || 8));
+                const repMax = Math.min(100, Math.max(repMin, Number(document.getElementById('plan-ex-rep-max').value) || 12));
+                const weightStep = Math.min(100, Math.max(0.25, Number(document.getElementById('plan-ex-weight-step').value) || 2.5));
+                const reps = usesProgression ? String(repMax) : (document.getElementById('plan-ex-reps').value.trim() || (type === 'cardio' ? '25min' : '30s')).slice(0, 30);
                 const detail = (document.getElementById('plan-ex-detail').value.trim() || '保持动作稳定，按当天状态微调。').slice(0, 500);
 
                 if (!name) {
@@ -1139,6 +1445,9 @@
                     type,
                     sets,
                     reps,
+                    repMin,
+                    repMax,
+                    weightStep,
                     icon: safeIcon(this.state.planDraftIcon, type),
                     detail
                 };
@@ -1189,6 +1498,7 @@
                         stats.completed++;
                         dayHasLog = true;
                         rows.forEach(row => {
+                            if (!rowIsCompleted(ex, row)) return;
                             if (ex.type === 'cardio') {
                                 stats.cardioMinutes += toNumber(row.t);
                                 stats.cardioKcal += toNumber(row.c);
@@ -1263,14 +1573,15 @@
                     const record = this.state.logs[dateKey];
                     const rows = record && record.day === day && record.entries ? record.entries[exerciseId] : null;
                     if (!isLogDone(ex, rows)) return;
+                    const completedRows = rows.filter(row => rowIsCompleted(ex, row));
 
                     let value = 0;
                     if (ex.type === 'cardio') {
-                        value = rows.reduce((sum, row) => sum + toNumber(row.t), 0);
+                        value = completedRows.reduce((sum, row) => sum + toNumber(row.t), 0);
                     } else if (ex.type === 'weighted') {
-                        value = Math.max(...rows.map(row => toNumber(row.w)), 0);
+                        value = Math.max(...completedRows.map(row => toNumber(row.w)), 0);
                     } else {
-                        value = Math.max(...rows.map(row => toNumber(row.r)), 0);
+                        value = Math.max(...completedRows.map(row => toNumber(row.r)), 0);
                     }
 
                     if (!value) return;
@@ -1357,6 +1668,7 @@
                             dayHasLog = true;
                         }
                         rows.forEach(row => {
+                            if (!rowIsCompleted(ex, row)) return;
                             if (ex.type === 'cardio') {
                                 cardioMinutes += toNumber(row.t);
                                 cardioKcal += toNumber(row.c);
@@ -1395,7 +1707,7 @@
                         const ex = this.getHistoricalExercise(record, exKey);
                         if (!ex || ex.type === 'cardio') return;
                         const rows = Array.isArray(record.entries[exKey]) ? record.entries[exKey] : [];
-                        const row = rows.find(r => r.w || r.r);
+                        const row = rows.find(r => rowIsCompleted(ex, r) && (r.w || r.r));
                         if (!row || recent.some(item => item.name === ex.name)) return;
                         recent.push({ name: ex.name, date: dateKey, w: row.w || '自重', r: row.r || '-' });
                     });
@@ -1418,7 +1730,7 @@
             },
             exportData() {
                 if (!confirm("确定导出Excel？")) return;
-                const rows = [["日期", "星期", "训练部位", "动作名称", "有氧方式", "组序", "重量(KG)/时长(Min)", "次数/心率", "卡路里/备注"]];
+                const rows = [["日期", "星期", "训练部位", "动作名称", "有氧方式", "组序", "重量(KG)/时长(Min)", "次数/心率", "RIR", "卡路里/备注"]];
                 let has = false;
                 Object.keys(this.state.logs).sort().forEach(dateKey => {
                     const record = this.state.logs[dateKey];
@@ -1431,15 +1743,16 @@
                         const sets = Array.isArray(record.entries[exKey]) ? record.entries[exKey] : [];
                         if (!ex) return;
                         sets.forEach((set, sIdx) => {
+                            if (!rowIsCompleted(ex, set)) return;
                             if (ex.type === 'cardio') {
                                 if (set.t || set.c) { 
                                     has = true; 
-                                    rows.push([dateKey, weekName, def.title, ex.name, set.m || '有氧运动', sIdx + 1, `${set.t} min`, `${set.h} bpm`, `${set.c} kcal`]); 
+                                    rows.push([dateKey, weekName, def.title, ex.name, set.m || '有氧运动', sIdx + 1, `${set.t} min`, `${set.h} bpm`, '', `${set.c} kcal`]);
                                 }
                             } else {
                                 if (set.w || set.r) { 
                                     has = true; 
-                                    rows.push([dateKey, weekName, def.title, ex.name, '', sIdx + 1, set.w, set.r, ex.detail]); 
+                                    rows.push([dateKey, weekName, def.title, ex.name, '', sIdx + 1, set.w, set.r, set.rir || '', ex.detail]);
                                 }
                             }
                         });
@@ -1453,7 +1766,7 @@
             exportBackup() {
                 const payload = {
                     app: "博士健身日志",
-                    version: 2,
+                    version: 3,
                     exportedAt: new Date().toISOString(),
                     logsByDate: this.state.logs,
                     workoutPlan: this.state.workouts
@@ -1506,7 +1819,7 @@
                                 });
                             }
                             cleaned[dateKey] = {
-                                version: 2,
+                                version: 3,
                                 day,
                                 entries,
                                 exerciseSnapshots
