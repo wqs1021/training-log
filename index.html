@@ -12,6 +12,7 @@
     <link rel="apple-touch-icon" href="./assets/icon-192.png">
     <link rel="icon" href="./assets/icon-192.png" type="image/png">
     <link rel="manifest" href="./manifest.json">
+    <link rel="canonical" href="https://wqs1021.github.io/">
 
     <title>训练日志</title>
     <link rel="stylesheet" href="./assets/app.css">
@@ -143,9 +144,17 @@
                     <div id="monthly-summary" class="grid grid-cols-2 gap-3"></div>
                 </div>
                 <div class="bg-white p-5 rounded-3xl border border-gray-100">
-                    <div class="flex items-center justify-between gap-3 mb-4">
-                        <h3 class="text-lg font-bold text-gray-800 flex-shrink-0">动作趋势</h3>
-                        <select id="trend-exercise-select" onchange="App.renderTrendChart()" class="min-w-0 flex-1 h-10 rounded-2xl bg-white px-3 text-xs font-bold border border-gray-100"></select>
+                    <div class="mb-4">
+                        <h3 class="text-lg font-bold text-gray-800">动作趋势</h3>
+                        <div class="grid grid-cols-[1fr_auto] gap-2 mt-3">
+                            <select id="trend-exercise-select" onchange="App.renderTrendChart()" class="min-w-0 h-10 rounded-2xl bg-white px-3 text-xs font-bold border border-gray-100"></select>
+                            <select id="trend-metric-select" onchange="App.renderTrendChart()" class="h-10 rounded-2xl bg-white px-3 text-xs font-bold border border-gray-100">
+                                <option value="performance">表现</option>
+                                <option value="volume">容量</option>
+                                <option value="weight">重量</option>
+                                <option value="reps">次数</option>
+                            </select>
+                        </div>
                     </div>
                     <div id="trend-empty" class="hidden text-center py-10 text-sm text-gray-400">暂无趋势数据。</div>
                     <div id="trend-chart-wrap" class="h-64 relative"><canvas id="trendChart"></canvas></div>
@@ -155,6 +164,7 @@
                     <div id="recent-progress-list" class="space-y-3 text-sm text-gray-600"></div>
                 </div>
                 <div class="pt-4">
+                    <div id="backup-status" class="mb-3 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-800"></div>
                     <button type="button" onclick="App.exportData()" class="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold text-base active:scale-[0.98] transition-all flex items-center justify-center space-x-2">
                         <i class="fa-solid fa-file-csv"></i><span>导出 CSV 数据</span>
                     </button>
@@ -294,6 +304,17 @@
                             <input id="plan-ex-reps" type="text" maxlength="30" class="w-full h-12 rounded-2xl bg-gray-50 px-4 font-bold border border-transparent focus:border-blue-500" placeholder="12 或 30s">
                         </label>
                     </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <label class="block" id="plan-rest-field">
+                            <span class="block text-xs font-bold text-gray-400 mb-2">组间休息（秒）</span>
+                            <input id="plan-ex-rest" type="number" min="15" max="600" step="15" inputmode="numeric" class="w-full h-12 rounded-2xl bg-gray-50 px-4 font-bold border border-transparent focus:border-blue-500" placeholder="90">
+                        </label>
+                        <label class="flex items-end">
+                            <span class="w-full h-12 rounded-2xl bg-gray-50 px-4 flex items-center gap-3 text-sm font-bold text-gray-700">
+                                <input id="plan-ex-optional" type="checkbox" class="w-5 h-5 accent-blue-600"><span>可选动作</span>
+                            </span>
+                        </label>
+                    </div>
                     <div id="plan-progression-fields" class="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 space-y-3">
                         <div>
                             <div class="text-xs font-black text-emerald-800">双重渐进</div>
@@ -340,6 +361,7 @@
         const DATA_KEY = 'drlog_gym_pro_daily_v1';
         const LEGACY_DATA_KEY = 'drlog_gym_pro_data';
         const PLAN_KEY = 'drlog_gym_pro_plan_v1';
+        const META_KEY = 'drlog_gym_pro_meta_v1';
         const CARDIO_MODES = ['有氧运动', '椭圆机', '爬楼机', '跑步机爬坡', '跑步机慢跑', '单车'];
         const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
         let storageAvailable = true;
@@ -385,6 +407,15 @@
                 storageAvailable = false;
                 console.warn('Local storage write failed', error);
                 return false;
+            }
+        }
+
+        function restoreStorageValue(key, value) {
+            try {
+                if (value === null) localStorage.removeItem(key);
+                else localStorage.setItem(key, value);
+            } catch (error) {
+                console.warn('Local storage rollback failed', error);
             }
         }
 
@@ -491,6 +522,19 @@
             };
         }
 
+        function defaultRestSeconds(type) {
+            if (type === 'cardio') return 0;
+            if (type === 'time' || type === 'bodyweight') return 60;
+            return 90;
+        }
+
+        function exerciseSettings(ex) {
+            return {
+                restSeconds: Math.min(600, Math.max(0, Number(ex.restSeconds) || defaultRestSeconds(ex.type))),
+                isOptional: ex.isOptional === true || (ex.isOptional === undefined && ex.type === 'cardio')
+            };
+        }
+
         function targetLabel(ex) {
             if (ex.type === 'cardio' || ex.type === 'time') return String(ex.reps);
             const settings = progressionSettings(ex);
@@ -516,7 +560,8 @@
                     ...ex,
                     id: sanitizeExerciseId(ex.id, `default-${day}-${index}`),
                     icon: safeIcon(ex.icon, ex.type),
-                    ...progressionSettings(ex)
+                    ...progressionSettings(ex),
+                    ...exerciseSettings(ex)
                 }));
             });
             if (!raw || typeof raw !== 'object') return base;
@@ -540,6 +585,7 @@
                             sets: Math.min(20, Math.max(1, Number(ex.sets) || 1)),
                             reps: String(ex.reps || '12').trim().slice(0, 30),
                             ...progressionSettings({ ...ex, type }),
+                            ...exerciseSettings({ ...ex, type }),
                             type,
                             icon: safeIcon(ex.icon, type),
                             detail: String(ex.detail || '保持动作稳定，按当天状态微调。').trim().slice(0, 500)
@@ -641,7 +687,8 @@
                 type,
                 detail: String(value.detail || '').slice(0, 500),
                 icon: safeIcon(value.icon, type),
-                ...progressionSettings({ ...value, type })
+                ...progressionSettings({ ...value, type }),
+                ...exerciseSettings({ ...value, type })
             };
         }
 
@@ -697,10 +744,11 @@
         ];
 
         const App = {
-            state: { selectedDate: toDateKey(getInitialDate()), selectedDay: getWeekday(new Date()), logs: {}, workouts: normalizeWorkoutPlan(), modalExIdx: null, planEditIdx: null, planDraftIcon: null, currentView: 'home', chart: null, trendChart: null, trendKey: '', restTimerId: null, restEndsAt: 0 },
+            state: { selectedDate: toDateKey(getInitialDate()), selectedDay: getWeekday(new Date()), logs: {}, workouts: normalizeWorkoutPlan(), meta: {}, modalExIdx: null, planEditIdx: null, planDraftIcon: null, currentView: 'home', chart: null, trendChart: null, trendKey: '', restTimerId: null, restEndsAt: 0 },
             init() {
                 this.loadPlan();
                 this.loadLocal();
+                this.loadMeta();
                 this.renderAll();
                 this.disableServiceWorker();
                 if (!storageAvailable) this.showToast('浏览器存储不可用，请检查隐私设置');
@@ -721,6 +769,13 @@
             },
             savePlan() {
                 return safeStorageWrite(PLAN_KEY, JSON.stringify(this.state.workouts));
+            },
+            loadMeta() {
+                try { this.state.meta = JSON.parse(safeStorageRead(META_KEY) || '{}'); }
+                catch (error) { this.state.meta = {}; }
+            },
+            saveMeta() {
+                return safeStorageWrite(META_KEY, JSON.stringify(this.state.meta));
             },
             disableServiceWorker() {
                 if ('serviceWorker' in navigator) {
@@ -776,7 +831,8 @@
                     type: ex.type,
                     detail: ex.detail || '',
                     icon: safeIcon(ex.icon, ex.type),
-                    ...progressionSettings(ex)
+                    ...progressionSettings(ex),
+                    ...exerciseSettings(ex)
                 };
             },
             migrateLogs() {
@@ -1189,7 +1245,7 @@
                 row.classList.toggle('bg-gray-50', !completing);
                 button.className = `set-complete-btn w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0 transition-all ${completing ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-300 border-gray-200'}`;
                 button.setAttribute('aria-pressed', String(completing));
-                if (completing && ex.type !== 'cardio') this.startRestTimer(60);
+                if (completing && ex.type !== 'cardio') this.startRestTimer(exerciseSettings(ex).restSeconds);
                 this.renderProgressionAdviceFromForm();
             },
             startRestTimer(seconds = 60) {
@@ -1410,7 +1466,7 @@
 
                     return `<button type="button" onclick="App.openModal(${i})" class="w-full text-left bg-white p-4 rounded-2xl border ${done ? 'border-green-200' : 'border-gray-100'} flex items-center gap-3 active:scale-[0.98] transition-transform group">
                         <div class="w-11 h-11 rounded-xl ${done ? 'bg-green-50 text-green-600' : 'bg-blue-50 text-blue-600'} flex items-center justify-center text-base flex-shrink-0"><i class="fa-solid ${safeIcon(ex.icon, ex.type)}"></i></div>
-                        <div class="flex-1 min-w-0"><h3 class="font-bold text-gray-900 text-[15px] truncate">${escapeHtml(ex.name)}</h3><div class="text-[11px] text-gray-500 mt-1">${ex.sets}组 × ${escapeHtml(targetLabel(ex))}</div>${last ? `<div class="text-[10px] text-blue-600 mt-1 truncate">上次 ${escapeHtml(last.summary)} · ${formatShortDate(last.dateKey)}</div>` : ''}${adviceLine}</div>
+                        <div class="flex-1 min-w-0"><div class="flex items-center gap-2"><h3 class="font-bold text-gray-900 text-[15px] truncate">${escapeHtml(ex.name)}</h3>${ex.isOptional ? '<span class="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-full flex-shrink-0">可选</span>' : ''}</div><div class="text-[11px] text-gray-500 mt-1">${ex.sets}组 × ${escapeHtml(targetLabel(ex))}${ex.type !== 'cardio' ? ` · 休息${exerciseSettings(ex).restSeconds}秒` : ''}</div>${last ? `<div class="text-[10px] text-blue-600 mt-1 truncate">上次 ${escapeHtml(last.summary)} · ${formatShortDate(last.dateKey)}</div>` : ''}${adviceLine}</div>
                         <div class="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${done ? 'bg-green-500 text-white' : 'bg-gray-50 text-gray-300'}"><i class="fa-solid ${done ? 'fa-check' : 'fa-chevron-right'} text-xs"></i></div>
                     </button>`;
                 }).join('');
@@ -1437,7 +1493,7 @@
                         <div class="w-11 h-11 rounded-xl bg-blue-50 flex items-center justify-center text-blue-500"><i class="fa-solid ${safeIcon(ex.icon, ex.type)}"></i></div>
                         <div class="flex-1 min-w-0">
                             <div class="font-bold text-gray-900 text-sm truncate">${escapeHtml(ex.name)}</div>
-                            <div class="text-[11px] text-gray-400 mt-1">${typeLabel(ex.type)} · ${ex.sets}组 × ${escapeHtml(targetLabel(ex))}</div>
+                            <div class="text-[11px] text-gray-400 mt-1">${typeLabel(ex.type)} · ${ex.sets}组 × ${escapeHtml(targetLabel(ex))}${ex.type !== 'cardio' ? ` · ${exerciseSettings(ex).restSeconds}秒` : ''}${ex.isOptional ? ' · 可选' : ''}</div>
                         </div>
                         <button type="button" aria-label="编辑${escapeAttr(ex.name)}" onclick="App.openPlanEditor(${idx})" class="w-9 h-9 rounded-full bg-gray-50 text-gray-500 active-scale"><i class="fa-solid fa-pen text-xs"></i></button>
                     </div>
@@ -1502,8 +1558,9 @@
                 this.state.planEditIdx = idx;
                 const isEdit = idx !== null && idx !== undefined;
                 const day = this.state.workouts[this.state.selectedDay];
-                const ex = isEdit ? day.exercises[idx] : { name: '', type: 'weighted', sets: 3, reps: 12, repMin: 8, repMax: 12, weightStep: 2.5, detail: '', icon: null };
+                const ex = isEdit ? day.exercises[idx] : { name: '', type: 'weighted', sets: 3, reps: 12, repMin: 8, repMax: 12, weightStep: 2.5, restSeconds: 90, isOptional: false, detail: '', icon: null };
                 const settings = progressionSettings(ex);
+                const exerciseOptions = exerciseSettings(ex);
                 this.renderExerciseLibraryOptions();
                 this.state.planDraftIcon = ex.icon || null;
 
@@ -1516,6 +1573,8 @@
                 document.getElementById('plan-ex-rep-min').value = settings.repMin;
                 document.getElementById('plan-ex-rep-max').value = settings.repMax;
                 document.getElementById('plan-ex-weight-step').value = settings.weightStep;
+                document.getElementById('plan-ex-rest').value = exerciseOptions.restSeconds;
+                document.getElementById('plan-ex-optional').checked = exerciseOptions.isOptional;
                 document.getElementById('plan-ex-detail').value = ex.detail || '';
                 document.getElementById('plan-delete-btn').classList.toggle('hidden', !isEdit);
                 this.updatePlanProgressionFields();
@@ -1548,6 +1607,9 @@
                 document.getElementById('plan-ex-rep-min').value = settings.repMin;
                 document.getElementById('plan-ex-rep-max').value = settings.repMax;
                 document.getElementById('plan-ex-weight-step').value = settings.weightStep;
+                const exerciseOptions = exerciseSettings(ex);
+                document.getElementById('plan-ex-rest').value = exerciseOptions.restSeconds;
+                document.getElementById('plan-ex-optional').checked = exerciseOptions.isOptional;
                 document.getElementById('plan-ex-detail').value = ex.detail;
                 this.updatePlanProgressionFields();
             },
@@ -1557,6 +1619,7 @@
                 document.getElementById('plan-progression-fields').classList.toggle('hidden', !usesProgression);
                 document.getElementById('plan-target-reps-field').classList.toggle('hidden', usesProgression);
                 document.getElementById('plan-weight-step-field').classList.toggle('hidden', type !== 'weighted');
+                document.getElementById('plan-rest-field').classList.toggle('hidden', type === 'cardio');
             },
             closePlanModal() {
                 const overlay = document.getElementById('plan-modal-overlay');
@@ -1575,6 +1638,8 @@
                 const repMin = Math.min(100, Math.max(1, Number(document.getElementById('plan-ex-rep-min').value) || 8));
                 const repMax = Math.min(100, Math.max(repMin, Number(document.getElementById('plan-ex-rep-max').value) || 12));
                 const weightStep = Math.min(100, Math.max(0.25, Number(document.getElementById('plan-ex-weight-step').value) || 2.5));
+                const restSeconds = type === 'cardio' ? 0 : Math.min(600, Math.max(15, Number(document.getElementById('plan-ex-rest').value) || defaultRestSeconds(type)));
+                const isOptional = document.getElementById('plan-ex-optional').checked;
                 const reps = usesProgression ? String(repMax) : (document.getElementById('plan-ex-reps').value.trim() || (type === 'cardio' ? '25min' : '30s')).slice(0, 30);
                 const detail = (document.getElementById('plan-ex-detail').value.trim() || '保持动作稳定，按当天状态微调。').slice(0, 500);
 
@@ -1582,7 +1647,7 @@
                     alert('请填写动作名称');
                     return;
                 }
-                const invalidInput = ['plan-ex-sets', 'plan-ex-rep-min', 'plan-ex-rep-max', 'plan-ex-weight-step']
+                const invalidInput = ['plan-ex-sets', 'plan-ex-rest', 'plan-ex-rep-min', 'plan-ex-rep-max', 'plan-ex-weight-step']
                     .map(id => document.getElementById(id))
                     .find(input => !input.closest('.hidden') && !input.checkValidity());
                 if (invalidInput) {
@@ -1602,6 +1667,8 @@
                     repMin,
                     repMax,
                     weightStep,
+                    restSeconds,
+                    isOptional,
                     icon: safeIcon(this.state.planDraftIcon, type),
                     detail
                 };
@@ -1718,6 +1785,7 @@
                 const exerciseId = String(key || '').slice(separator + 1);
                 const ex = this.state.workouts[day] && this.state.workouts[day].exercises.find(item => item.id === exerciseId);
                 if (!ex) return { labels: [], values: [], unit: '' };
+                const metric = document.getElementById('trend-metric-select')?.value || 'performance';
 
                 const labels = [];
                 const values = [];
@@ -1731,20 +1799,27 @@
                     if (ex.type === 'cardio') {
                         value = completedRows.reduce((sum, row) => sum + toNumber(row.t), 0);
                     } else if (ex.type === 'weighted') {
-                        value = Math.max(...completedRows.map(row => toNumber(row.w)), 0);
+                        if (metric === 'volume') value = completedRows.reduce((sum, row) => sum + toNumber(row.w) * toNumber(row.r), 0);
+                        else if (metric === 'reps') value = Math.max(...completedRows.map(row => toNumber(row.r)), 0);
+                        else if (metric === 'performance') value = Math.max(...completedRows.map(row => toNumber(row.w) * (1 + toNumber(row.r) / 30)), 0);
+                        else value = Math.max(...completedRows.map(row => toNumber(row.w)), 0);
                     } else {
-                        value = Math.max(...completedRows.map(row => toNumber(row.r)), 0);
+                        value = metric === 'volume'
+                            ? completedRows.reduce((sum, row) => sum + toNumber(row.r), 0)
+                            : Math.max(...completedRows.map(row => toNumber(row.r)), 0);
                     }
 
                     if (!value) return;
                     labels.push(formatShortDate(dateKey));
-                    values.push(value);
+                    values.push(Math.round(value * 10) / 10);
                 });
 
+                let unit = ex.type === 'cardio' ? '分钟' : (ex.type === 'time' ? '秒' : '次');
+                if (ex.type === 'weighted') unit = metric === 'volume' ? 'kg容量' : (metric === 'reps' ? '次' : 'kg');
                 return {
                     labels,
                     values,
-                    unit: ex.type === 'cardio' ? '分钟' : (ex.type === 'weighted' ? 'kg' : (ex.type === 'time' ? '秒' : '次'))
+                    unit
                 };
             },
             renderTrendChart() {
@@ -1800,6 +1875,8 @@
                 });
                 let totalExercises = 0;
                 let completedExercises = 0;
+                let optionalTotal = 0;
+                let optionalCompleted = 0;
                 let trainingDays = 0;
                 let cardioMinutes = 0;
                 let cardioKcal = 0;
@@ -1812,11 +1889,13 @@
                     let c = 0;
                     let dayHasLog = false;
                     def.exercises.forEach((ex, i) => { 
-                        totalExercises++;
+                        if (ex.isOptional) optionalTotal++;
+                        else totalExercises++;
                         const rows = this.getExerciseRows(record, ex, i);
                         if (isLogDone(ex, rows)) {
                             c++;
-                            completedExercises++;
+                            if (ex.isOptional) optionalCompleted++;
+                            else completedExercises++;
                             dayHasLog = true;
                         }
                         rows.forEach(row => {
@@ -1830,7 +1909,9 @@
                         });
                     });
                     if (dayHasLog) trainingDays++;
-                    return def.exercises.length ? Math.round((c / def.exercises.length) * 100) : 0;
+                    const required = def.exercises.filter(ex => !ex.isOptional);
+                    const requiredDone = required.filter((ex, i) => isLogDone(ex, this.getExerciseRows(record, ex, def.exercises.indexOf(ex)))).length;
+                    return required.length ? Math.round((requiredDone / required.length) * 100) : 0;
                 });
 
                 const total = totalExercises ? Math.round((completedExercises / totalExercises) * 100) : 0;
@@ -1840,7 +1921,8 @@
                     { label: '力量组数', value: `${strengthSets}组`, icon: 'fa-dumbbell' },
                     { label: '有氧累计', value: `${cardioMinutes}min`, icon: 'fa-heart-pulse' },
                     { label: '有氧热量', value: `${cardioKcal}kcal`, icon: 'fa-fire' },
-                    { label: '完成动作', value: `${completedExercises}/${totalExercises}`, icon: 'fa-list-check' }
+                    { label: '必做动作', value: `${completedExercises}/${totalExercises}`, icon: 'fa-list-check' },
+                    { label: '可选完成', value: `${optionalCompleted}/${optionalTotal}`, icon: 'fa-circle-plus' }
                 ].map(item => `
                     <div class="bg-white p-3 rounded-2xl border border-gray-100 flex items-center gap-3">
                         <div class="w-9 h-9 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center flex-shrink-0"><i class="fa-solid ${item.icon} text-sm"></i></div>
@@ -1875,6 +1957,19 @@
                 this.renderMonthlySummary();
                 this.renderTrendOptions();
                 this.renderTrendChart();
+                this.renderBackupStatus();
+            },
+            renderBackupStatus() {
+                const el = document.getElementById('backup-status');
+                if (!el) return;
+                const count = Object.keys(this.state.logs).length;
+                const last = this.state.meta.lastBackupAt ? new Date(this.state.meta.lastBackupAt) : null;
+                const age = last && !Number.isNaN(last.getTime()) ? Math.floor((Date.now() - last.getTime()) / 86400000) : null;
+                const due = count > 0 && (age === null || age >= 14);
+                el.className = `mb-3 rounded-2xl border px-4 py-3 text-xs leading-relaxed ${due ? 'border-amber-100 bg-amber-50 text-amber-800' : 'border-emerald-100 bg-emerald-50 text-emerald-800'}`;
+                el.innerHTML = due
+                    ? `<strong>建议备份：</strong>已有 ${count} 天记录，${age === null ? '尚未在本机备份' : `上次备份是 ${age} 天前`}。`
+                    : `<strong>备份正常：</strong>${last.toLocaleDateString('zh-CN')} 已导出 JSON。`;
             },
             exportData() {
                 const rows = [["日期", "星期", "训练状态", "训练部位", "动作名称", "有氧方式", "组序", "重量(KG)/时长(Min)", "次数/心率", "RIR", "卡路里/备注"]];
@@ -1933,6 +2028,9 @@
                 document.body.appendChild(a);
                 a.click();
                 a.remove();
+                this.state.meta.lastBackupAt = new Date().toISOString();
+                this.saveMeta();
+                this.renderBackupStatus();
                 setTimeout(() => URL.revokeObjectURL(url), 1000);
             },
             importBackup() {
@@ -1982,19 +2080,29 @@
                             };
                         });
                         if (!Object.keys(cleaned).length) throw new Error('Empty backup');
-                        if (!confirm("恢复备份会覆盖当前本地数据，确定继续？")) return;
-                        let planSaved = true;
-                        if (parsed.workoutPlan) {
-                            this.state.workouts = normalizeWorkoutPlan(parsed.workoutPlan);
-                            planSaved = this.savePlan();
+                        const dateCount = Object.keys(cleaned).length;
+                        const exerciseCount = Object.values(cleaned).reduce((sum, record) => sum + Object.keys(record.entries || {}).length, 0);
+                        const setCount = Object.values(cleaned).reduce((sum, record) => sum + Object.values(record.entries || {}).reduce((n, rows) => n + rows.length, 0), 0);
+                        if (!confirm(`备份包含 ${dateCount} 天、${exerciseCount} 个动作记录、${setCount} 组数据。恢复会覆盖当前本地数据，确定继续？`)) return;
+
+                        const nextWorkouts = parsed.workoutPlan ? normalizeWorkoutPlan(parsed.workoutPlan) : this.state.workouts;
+                        const previousPlan = safeStorageRead(PLAN_KEY);
+                        const previousLogs = safeStorageRead(DATA_KEY);
+                        const planSaved = safeStorageWrite(PLAN_KEY, JSON.stringify(nextWorkouts));
+                        const logsSaved = planSaved && safeStorageWrite(DATA_KEY, JSON.stringify({ version: 4, logsByDate: cleaned }));
+                        if (!planSaved || !logsSaved) {
+                            restoreStorageValue(PLAN_KEY, previousPlan);
+                            restoreStorageValue(DATA_KEY, previousLogs);
+                            throw new Error('Storage write failed');
                         }
+                        this.state.workouts = nextWorkouts;
                         this.state.logs = cleaned;
-                        this.migrateLogs();
-                        const logsSaved = this.persistLocal();
                         this.renderAll();
-                        this.showToast(planSaved && logsSaved ? "备份已恢复" : '备份已载入，但浏览器未能持久保存');
+                        this.showToast("备份已恢复");
                     } catch (e) {
-                        alert("备份文件格式不正确，无法恢复。");
+                        alert(e && e.message === 'Storage write failed'
+                            ? "浏览器存储空间不足或不可用，恢复已取消，原数据保持不变。"
+                            : "备份文件格式不正确，无法恢复。");
                     } finally {
                         input.value = '';
                     }
